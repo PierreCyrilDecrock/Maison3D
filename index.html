@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2457c5">
+<meta name="description" content="Dessinez les murs d'un logement, meublez-le automatiquement et visitez-le en 3D.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Maison 3D">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>:root{color-scheme:light;padding-block:env(safe-area-inset-top,0px) env(safe-area-inset-bottom,0px)}html,body{margin:0}body{font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<!--
+RÈGLES DU PROJET « Maison 3D » (à relire et respecter à chaque étape)
+
+- Artefact unique « Maison 3D » : à chaque étape, mets à jour le même artefact (même lien) ; n'en crée jamais un autre sauf si je le demande ; modifie uniquement les fichiers concernés et conserve l'existant. (Cette copie, née après la phase 8, est l'artefact des développements suivants : l'original reste intact.)
+- Technologies : HTML, CSS et JavaScript en modules ES, sans framework ni compilation ; Three.js via CDN ; Canvas 2D natif pour l'éditeur de plan.
+- Fichiers : core.js (logique pure, sans DOM ni Three.js), store.js, editor2d.js, viewer3d.js, furniture.js, generator.js (pur), ui.js, tests.js.
+- Unités : mètres ; une case = 0,5 m par défaut (0,1 m en grille fine, réglage du document : doc.grid.cellSize) ; axes : plan 2D (x, y) devient 3D (x, z), y = hauteur.
+- Un seul objet JSON (le document, version 2) ; les pièces sont dérivées, jamais stockées ; toute modification passe par des actions du store avec historique annuler / rétablir.
+- Interface en français, utilisable au doigt (cibles d'au moins 44 px, gestes tactiles) et à la souris.
+- Toute logique de core.js et generator.js a des tests dans tests.js ; exécute-les aussi dans ton environnement quand c'est possible avant de publier.
+- localStorage toujours dans un try/catch ; aucun serveur ; scripts externes uniquement depuis jsdelivr, cdnjs ou unpkg.
+- Avant de publier, vérifie que la page se charge sans erreur ; en fin d'étape, réponds en 3 lignes : ce qui change, comment le tester, limites connues.
+
+ÉTAT DU PROJET
+- Phase 12 terminée (garage, nouvelles pièces, variété du mobilier). (1) Pièces rangées par FAMILLES (ROOM_GROUPS dans core.js, menu groupé dans ui.js) : 16 types — séjour, salle à manger, cuisine, chambre, salle de bain, WC, entrée, couloir, bureau, buanderie, chambre d'enfant, dressing, cellier, atelier, garage, « Autre ». Les 15 premiers ont une recette de génération (RAW_RECIPES dans generator.js) ; « Autre » = type par défaut des pièces non typées, volontairement non meublé. (2) Catalogue : furniture-kit.js (briques communes : caisson, chaise, makeKit…), furniture-home.js (maison : lits superposés, dressing, cellier…), furniture-garage.js (voiture, grande voiture, moto, vélo, établi, panneau d'outils, armoire métal, rayonnage, servante, pneus, bac, congélateur coffre…), furniture-models.js (ALT_MODELS : id → modèles alternatifs, le modèle d'origine reste le n° 0 ; withAlternatives dans furniture.js). Convention : avant = +Z, origine = centre de l'empreinte, bas à y = 0, boîte englobante = dimensions déclarées à 5 % près pour TOUS les modèles (testé), < 6000 triangles. (3) Variété : chaque meuble a plusieurs modèles tirés au hasard à chaque génération (variante seed % nombre de modèles), les recettes proposent plusieurs choix pondérés par slot (minArea…), la cuisine varie (lave-vaisselle, colonne four, îlot), plantes / objets posés / radiateurs / stores / décors muraux au choix. (4) Générateur : nouvelles stratégies — park (voiture : parallèle au mur ou au centre, loin de la porte, axe long), tucked, foot-of, island-stools, under-window, front-of, flank… ; garde-fou de circulation pour les emplacements obligatoires (blockingViolations : un meuble qui bouche une porte est annulé) ; accès (access:true) vérifiés par validateLayout. Garage : voiture (2e voiture ≥ 26 m²), établi + panneau d'outils, armoire métallique, rayonnage, moto, vélo, servante, poubelle, pneus, caisses, congélateur, tube lumineux. (5) Tests : 504 (dont « garage, nouvelles pièces et variété » : modèles dans leur boîte, 100 % de pièces valides, voiture jamais devant une porte, variété d'une génération à l'autre). Fichiers : index.html, styles.css, core.js, store.js, editor2d.js, viewer3d.js, furniture.js, furniture-kit.js, furniture-home.js, furniture-garage.js, furniture-models.js, generator.js, ui.js, tests.js. Limites : le frigo américain n'est pas posé automatiquement, une voiture demande ≈ 3 m × 5 m libres et ne se gare pas devant une porte ou fenêtre, la 2e voiture n'apparaît que dans les grands garages, les tests de la page tournent avec 20 graines (200 par le bouton).
+- Phase 10 terminée (mise à jour des escaliers de la copie « Étages ») : (1) Modèle : un escalier { id, x, y, w, d, dir } (boîte englobante en mètres, dir = sens de la première volée) peut avoir en plus `kind` ('l' quart tournant, 'u' demi-tour, 'spiral' colimaçon ; absent = droit), `turn` ('right' ; absent = 'left' : côté du virage ou sens de rotation), `under` ('open' ; absent = 'solid') et `b` (largeur de marche d'un L) : seuls les champs qui s'écartent des valeurs par défaut sont stockés, les anciens plans restent valides. stairLayout(stair) (core.js, mis en cache) donne les parties { flight | landing | spiral } avec t0/t1 = part du dénivelé (0 au pied, 1 à l'étage), le bord d'entrée (bottom) et de sortie (top) et le jour d'un U (divider) ; stairClimb(stair, x, y) → t ou null (altitude du marcheur = t × stairRise), stairRects, stairContains, stairOutline, stairPathLength ; createStairSpec(plan, point, dir, { kind, turn, under }), setStairKind, setStairUnder, flipStair (droit : sens inversé ; L / U : miroir ; colimaçon : autre sens), stairResizePatch(stair, 'width' | 'run' | 'side', delta). (2) Murs : un escalier peut longer un mur (canPlaceStair refuse seulement un mur qui le traverse strictement, 'wall', ou une porte / un passage qu'il boucherait, 'opening'). (3) Dessous : « Plein » = bloc plein avec façades de rangement (portes et poignées, kinds 'stair-storage' / 'stair-handle', omises contre un mur) ; « Ouvert » = marches fines sur crémaillère, vide dessous (stairBoxes(stair, wallHeight, plan)). Les boîtes de la structure peuvent avoir un champ `angle` (rotation autour de l'axe vertical, marches du colimaçon) : mergeBoxes (viewer3d.js) et rayHitsBox (soleil) le gèrent. (4) generator.js : la grille d'une pièce garde une hauteur libre par case de 10 cm (grid.headroom) : sous un escalier ouvert on peut poser du mobilier bas (≥ 1,9 m de dégagement pour marcher dessous) ; plus aucun objet mural, fenêtre ou plafonnier à moins de 0,6 m d'un escalier ni au-dessus (CELL_STAIRZONE, raison 'stair' pour la pose à la main) ; garde-corps = union des contours (stairObstacles au rez-de-chaussée, stairWellRails pour la trémie). (5) Interface : panneau Escalier = Style (Droit, En L, En U, Colimaçon), Dessous (Plein, Ouvert), Largeur, Montée, Côté (L), Diamètre (colimaçon) ; sans escalier sélectionné, ces choix s'appliquent au prochain escalier posé (editor.setStairStyle). 403 tests.
+- Phase 11 terminée (styles d'escalier, d'après la galerie « Styles d'escalier ») : un escalier a en plus `frame` ('spine' limon central, 'floating' marches flottantes ancrées dans un mur ; absent = 'stringer', limon crémaillère ; seulement avec under 'open', pas pour un colimaçon), `rail` ('none', 'handrail', 'metal', 'cable', 'flat', 'slats' ; absent = 'wood', barreaux bois ; jamais de verre, pas de muret) et `finish` ('ash', 'walnut', 'black', 'concrete' ; absent = 'oak') : champs écrits seulement s'ils s'écartent des défauts. core.js : STAIR_FRAMES / STAIR_STEPS / STAIR_RAILS / STAIR_FINISHES, stairSteps / stairFrame / stairRail / stairFinish, setStairSteps (flottantes refusées sans mur : stairWallBacked ; sans mur au rendu elles retombent sur la crémaillère), setStairRail, setStairFinish ; stairBoxes met des matières `stair:<finition>:<partie>` (tread, struct, wood, metal, steel, door) et pose les garde-corps (kind 'rail', stairRailBoxes) le long des marches sur les côtés libres (ni contre un mur, ni au pied ou à l'arrivée) ; stairWellBoxes (étage, via buildStructure `upper`) autour de la trémie sauf l'arrivée. Les boîtes inclinées ont un champ `pitch` (avec `angle`) géré par mergeBoxes. Les collisions de la visite ne changent pas (stairObstacles, wellRails). Panneau : listes Marches, Garde-corps, Finition. 412 tests.
+- Phase 9 terminée (copie de l'artefact de la phase 8) : étages, grille fine, mobilier à la main, finitions, soleil. (1) Document v2 : { version: 2, grid, wallHeight, style, lighting: { hour, month, north, latitude, lamps }, levels: [{ id, name, walls, openings, roomTypes, roomNames, roomLocks, roomFinishes, furniture, stairs }] } ; migrations 0→1→2 ; les fonctions pures du plan travaillent sur la « vue d'un niveau » (levelPlan(doc, i), avec en plus `wells` = escaliers du niveau du dessous vus d'en haut) et withLevelPlan les réinjecte. (2) Grille : doc.grid.cellSize = 0,5 ou 0,1 m ; convertGridStep conserve les mètres (0,5 → 0,1 exact ; 0,1 → 0,5 arrondit, avec confirmation et annulation possible). (3) Étages : altitude d'un niveau = i × (hauteur des murs + 0,2 m) ; planchers épais percés d'une trémie ; escaliers (stairs, en mètres, sur le niveau du bas ; 15 marches ; poser un escalier crée le niveau du dessus) ; vues 3D Jusqu'ici / Tous / Seul ; visite avec altitude continue (buildWalkBuilding, stepWalker, walkGround, wellRails dans generator.js) ; Générer peut meubler tous les niveaux. (4) Mobilier à la main (outil Mobilier) : déplacer, tourner (R), remplacer par une variante, dupliquer, supprimer, ajouter depuis le catalogue ; une pièce retouchée est verrouillée ; un second toucher passe à l'objet situé dessous (luminaire de plafond en dernier). (5) Finitions par pièce (roomFinishes : sol, murs, plinthes) avec textures procédurales dessinées en canvas (drawFinishPattern, coordonnées en mètres, sans raccord). (6) Soleil : curseurs Heure, Mois, Nord ; position solaire pure (sunPosition, sunDirection) ; ombres statiques, recalculées seulement au changement ; luminaires allumés la nuit (réserve de PointLights) ; rapport d'ensoleillement par pièce (computeSunReport). Fichiers inchangés dans leur liste : index.html, styles.css, core.js, store.js, editor2d.js, viewer3d.js, furniture.js, generator.js, ui.js, tests.js (387 tests).
+- Phase 0 terminée : base technique (grille 2D, scène 3D, modèle de données, tests).
+- Phase 1 terminée : éditeur de murs (outils Mur, Gomme, Main ; zoom et déplacement ; annuler / rétablir ; tout effacer ; sauvegarde automatique).
+- Phase 8 terminée : finalisation. (1) core.js : TEMPLATES (studio, T2, T3, maison de 4 pièces : murs, portes, fenêtres, passages et types de pièces décrits par une spec compacte) + buildTemplate(id) → plan valide ; tagExteriorBoxes(plan, boxes, rooms) marque les boîtes de mur situées sur le pourtour du logement (murs « extérieurs »). (2) generator.js, section 10 : monde de collision de la visite (buildWalkWorld : murs, cadres de fenêtre, portes ouvertes = passage libre, meubles posés au sol), walkBlocked, moveWalker (marcheur = cercle de 0,25 m, glisse le long des obstacles), findWalkStart. (3) viewer3d.js : visite à la première personne (startWalk / stopWalk / setWalkStick / onWalkChange ; caméra à 1,60 m, angle de 70°, ZQSD ou WASD par event.code, flèches, Maj = courir, glisser pour regarder, sans verrouillage du pointeur), mode de murs « auto » (masque les murs extérieurs entre la caméra et l'intérieur), ombres statiques (recalculées seulement quand le plan change : shadowMap.autoUpdate = false + shadowDirty), résolution adaptée (ratio de pixels ≤ 1,5 sur écran tactile, abaissé automatiquement si les images sont lentes), rendu à la demande, getRenderStats() pour le compteur de debug. (4) ui.js : LABELS = tous les textes de l'interface regroupés par thème dans un seul objet (+ label(chemin) et applyLabels() qui remplit les attributs data-l, data-l-title, data-l-aria, data-l-ph de index.html) ; écran d'accueil à modèles, tutoriel en 4 étapes (mémorisé : maison3d.welcome, maison3d.tour), joystick virtuel, aide (gestes, raccourcis, partage, thème Auto / Clair / Sombre mémorisé dans maison3d.theme, compteur de debug aussi par Ctrl+Maj+D), bouton « Partager » (copie le lien de partage de la phase 7 ; sinon l'affiche dans le panneau Projets). (5) Pour ajouter une langue : copier LABELS, traduire, choisir l'objet actif ; les chaînes encore écrites en dur dans index.html et dans les panneaux des phases précédentes sont listées dans les limites connues.
+- Phase 7 terminée : persistance, export et partage, sans serveur ni compte. (1) store.js : createStorage(getBacking) = localStorage dans un try/catch avec copie en mémoire (available / persisted ; ne lève jamais) ; createProjects(storage) = liste de projets { id, name, createdAt, updatedAt } dans « maison3d.projects » (index + projet actif), un plan JSON par projet dans « maison3d.project.<id> » ; load() relit le projet actif, reprend l'ancien plan unique « maison3d.plan » comme premier projet (« Mon logement ») et ne détruit jamais un plan illisible ; create / rename / duplicate / remove / setActive / savePlan / readPlan ; autosave(store, projects, onStatus, { delay: 500 }) écrit dans le projet actif 500 ms après le dernier changement et à la fermeture (flush, rebase pour un plan qu'on vient d'ouvrir). store.actions.loadPlan passe par readPlan (migration + validation complète, historique vidé). (2) core.js : PLAN_LIMITS, STYLE_PRESETS ; validatePlan complet (types, bornes, doublons, ouvertures sur des murs existants, palette, rotation et position du mobilier, objets connus, références croisées : clés roomTypes / roomNames / roomLocks = pièces existantes, mobilier dans sa pièce) ; MIGRATIONS + migratePlan(plan) (version absente = 0 ; chaque migration passe de v à v+1 ; version plus récente refusée en français) ; readPlan (migration, normalisation, validation, retrait des clés de pièces orphelines) ; exportPlanText (enveloppe { app: 'maison-3d', format: 1, name, exportedAt, plan }) et parsePlanText (enveloppe, plan brut, BOM, erreurs en français) ; extractShareCode ; crc32, zipStore (archive sans compression) et fileSlug. Pour faire évoluer le format : PLAN_VERSION + 1 et une entrée MIGRATIONS[ancienne version] qui renvoie le plan converti, avec un test de migration. (3) generator.js : buildShare(plan, { compress, maxLength, name }) → { code, mode: 'plan' | 'light' | 'full', lossless } : sans mobilier ou « allégé » (le mobilier n'est pas joint, il est régénéré à l'identique par la graine et la palette ; vérifié avant) ; sinon plan complet s'il tient dans SHARE_MAX_LENGTH (6000 caractères), sinon allégé « avec perte » ; readShare(code, { decompress }) remeuble un plan allégé. (4) ui.js : panneau « Projets et fichiers » (bouton de l'en-tête : liste, renommage et suppression en ligne, export JSON / image du plan / modèle .glb / capture 3D / lien, import par fichier ou collage de JSON, de lien ou de code) ; export par la capacité « downloads » de l'artefact, sinon <a download>, sinon zone de texte + Copier ; le .glb est rangé dans un .zip si l'extension est refusée ; bandeaux : stockage indisponible (invite à exporter), plan partagé trouvé dans #plan=… (ouvert comme NOUVEAU projet, jamais en écrasant) ; lz-string chargé à la demande depuis cdnjs. editor2d.js : exportImage() (même rendu que l'écran, sans sélection). viewer3d.js : exportGLB() (GLTFExporter de jsDelivr, murs à pleine hauteur, mobilier compris). (5) tests : validation, migration v0 → v1, JSON corrompus, aller-retour, régénération depuis la graine, partage, zip, stockage indisponible ou plein, projets, sauvegarde anti-rebond.
+- Phase 6a terminée : generator.js (pur : importe core.js et les DONNÉES de furniture.js (FURNITURE_DATA) ; ni DOM, ni Three.js) = briques du générateur. (1) Hasard : createRng(seed) mulberry32 { next, range, int, pick, weightedPick(items, poids), shuffle, chance, fork(texte) } et hash(seed, texte) pour dériver des sous-graines. (2) Grille d'occupation à 10 cm d'une pièce : createRoomGrid(plan, room) → cases CELL_FLOOR / CELL_WALL (mur 10 cm + marge 5 cm de chaque côté et à chaque bout, donc 10 cm entre l'axe du mur et un objet) / CELL_DOOR (getClearanceZones, côté où la porte s'ouvre) / CELL_WINDOW (0,5 m devant la fenêtre, windowTop = allège) / CELL_OPENING (bande d'une porte ou d'un passage) ; grid.doors (portes et passages avec sens `inward`), grid.windows, grid.objects, grid.solid ; gridToText pour déboguer. (3) Objets : makeFootprint({ x, y, w, d, rotation }) rectangle orienté (0/90/180/270 = rotation.y de Three.js ; avant +Z local = +y du plan à 0°), createPlaced(def, { x, y, rotation }) → { id, layer floor|wall|window|ceiling, footprint, bottom, top, solid, clearanceFront, canOverlap }, footprintsOverlap, placementsConflict (sol + hauteur + canOverlap), rectInRoom, frontClearanceRect, sideClearanceRects, isFrontClear, checkPlacement(grid, placed, { clearance: 'both'|'own'|false }) → { ok, reasons (outside wall door window opening object clearance), conflicts }, addObject / removeObject / tryPlaceObject (annuler un placement = removeObject). (4) Connexité : checkConnectivity(grid, { minWidth 0.6, zones, pocketArea 1, relative true }) : positions d'un corps carré de 60 cm, remplissage 4-connexe ; chaque porte ou passage doit être atteint et relié aux zones importantes (par défaut : dégagement frontal des objets posés) ; poches libres isolées ≥ 1 m² signalées ; en mode relatif seul ce que les meubles ont rendu inaccessible compte (pièce vide comme référence). 
+- Phase 6b terminée : placement des pièces (mécanisme ; les recettes de tous les types sont en 6c). generator.js : RECIPES[type] = { groups: { groupe: { anchor } }, slots: [{ slot (rôle), group?, choices [{ id, weight, minArea }], min, max, chance, priority, strategy, rules [[règle, poids]], hosts?, access?, clearance?, perAnchor? }] } ; generateRoom(room, plan, seed, style) → PlacedItem[] { roomId, key, id, role, group, optional, x, y (centre au sol, plan), rotation (rotation.y en degrés), elevation (bas de l'objet, m), seed (variations) } ; generateRoomReport → { items, attempts, pruned, ok, missing, type } ; generateLayout(plan, seed, style, rooms?) pour toutes les pièces ; validateLayout(room, plan, items) = contrôle indépendant. Principe : slots du plus prioritaire au moins prioritaire (puis du plus grand au plus petit) ; candidats selon la stratégie (wall, corner, free-center, wall-spot, front-of, flank, under, bed-sides, tucked, on-top, above-host, at-window, ceiling), 4 orientations, invalides rejetés (checkPlacement), valides notés (RULES : centré sur le mur, face au meuble TV, lit loin des fenêtres, objets hauts à 30 cm des fenêtres, loin des portes, 30 cm libres autour de la table…), tirage au hasard parmi les TOP_K = 3 meilleurs (à au plus TOP_MARGIN points du premier) ; un groupe (canapé + table basse + fauteuils + tapis + cadre ; lit + 2 chevets + lampes + tapis + cadre ; table + tapis) est simulé pour plusieurs emplacements de l'ancre puis posé comme une unité ; boucle d'essais : si checkConnectivity échoue (porte, accès aux rangements, poches), nouvelle sous-graine hash(seed, id de pièce) → fork('try-k'), jusqu'à MAX_ATTEMPTS = 20, puis on retire les objets facultatifs (puis obligatoires) jusqu'à rétablir le passage. Les chaises font partie des modèles de table. Le style règle la densité du décor (STYLE_DENSITY) et la palette de la vue 3D. tests.js : runTests({ seeds }) (200 par défaut ; 20 au chargement de la page, bouton « 200 graines » du panneau Tests ; chaque résultat a `ms`).
+- Phase 6c terminée : logement meublé, enregistré dans le plan. (1) Recettes pour 10 types (living, bedroom, dining, kitchen, bathroom, toilet, office, entrance, laundry, hallway) : RECIPES[type].slots avec `decor` (passe de décoration : plantes dans les coins libres, cadres, objets posés, plafonnier, rideaux salon/chambre ; la décoration part la première si le passage est coupé et ne gêne pas les 30 cm autour d'une table) ; cuisine : planificateur `planner: 'kitchen'` (planKitchen : 1 ou 2 lignes de modules le long des murs, frigo, évier, plaque, meubles hauts, hotte ; îlot + tabourets si la pièce est assez grande). (2) Données : plan.furniture = [{ id « roomId:clé », defId, roomId, x, z (centre au sol, mètres), rotationY (degrés), y? (hauteur du bas), role, variant: { seed: texte } }] ; plan.roomLocks[« x,y »] = true (mobilier verrouillé, même clé que roomTypes) ; plan.style = { preset (palette du logement), seed }. core.js : isRoomLocked, setRoomLock, normalizePlan, buildWallTints (peaux de couleur des murs, matière « tint:<pièce> », option `tints` de buildStructure). (3) generator.js : generateHome(plan, seed, style, { rooms?, only? }) → { plan, reports } (pièces verrouillées conservées ; `only` = pièces à régénérer ; une seule palette), reconcileFurniture(plan, rooms) (rattache chaque objet à la pièce qui contient son centre ; garde le mobilier d'une pièce s'il passe validateLayout et si ses rôles sont dans la recette, sinon le retire), removeFurniture, toPlanItem / fromPlanItem, roomWallVariation(seed, pièce) (petits décalages HSL des murs par pièce). (4) store.js : actions generateHome({ seed, style }), regenerateRoom(id, seed), toggleRoomLock(id, locked?), clearFurniture(), setStyle(preset), toutes annulables (une entrée d'historique) ; murs, ouvertures et types de pièce réconcilient le mobilier (changer le type d'une pièce retire son mobilier) ; un résultat identique n'ajoute rien à l'historique. (5) viewer3d.js : createFurnitureLibrary() (un gabarit par objet et variante seed % 4, géométries fondues par matériau avec couleurs de sommets, une dizaine de matériaux partagés, InstancedMesh à partir de 3 exemplaires, les autres fondus en un lot par matériau ; vidé au changement de palette) ; murs teintés par pièce quand le plan est meublé (roomWallColor). (6) ui.js / index.html : barre Générer (Générer avec la graine du champ, dé = graine au hasard + génération, style, Vider le mobilier, annuler / rétablir), cadenas et Régénérer sur chaque pièce du panneau Pièces. (7) tests : plans de 3 et 6 pièces × 200 graines sans violation, génération du logement sous 300 ms (p95), verrous, réconciliation, annulation, peaux de murs.
+- Phase 5 terminée : furniture.js = catalogue d'objets procéduraux piloté par les données, SANS import de Three.js (FURNITURE_DATA : id, label, category, roomTypes [{ type, weight }], size { w, d, h }, placement { mode wall|corner|free|wall-mounted|window|ceiling, clearanceFront, clearanceSides, canOverlap, mountHeight? } ; FURNITURE_BUILDERS : id → build(ctx) ; PALETTES ; createRng / createNeutralRng ; createBuildContext(three, { palette, seed, variations }) ; buildFurniture(def, ctx)). Chaque build reçoit ctx = { rng, palette, THREE, RoundedBoxGeometry } et renvoie un THREE.Group : avant = +Z, origine = centre de l'empreinte au sol, bas à y = 0 (objet mural : placement.mountHeight = hauteur du bas ; luminaire : sous le plafond). Mode Catalogue (bouton « Catalogue » de l'en-tête, createCatalogViewer dans viewer3d.js : un seul canvas WebGL pour toutes les cases). Suite : phase 6 (generator.js, voir 6a).
+- Phase 4 terminée : vue 3D du plan (core.js : buildStructure = liste de boîtes { kind, material, position, size } sans Three.js, getPlanExtent ; viewer3d.js : géométries fusionnées par matériau, reconstruction anti-rebond de 100 ms, rendu à la demande, boutons Dessus / Perspective, Murs complets / abaissés (0,3 m), Capture PNG ; sur téléphone, onglet « Plan + 3D »).
+- Phase 3 terminée : portes, fenêtres et passages (core.js : addOpening, updateOpening, flipOpening, removeOpening, findOpeningPlacement, getClearanceZones, wallRectsWithOpenings ; outils Porte / Fenêtre / Passage, aperçu puis pose, bouton Inverser, panneau de propriétés, case « Zones de dégagement »).
+- Phase 2 terminée : détection des pièces (core.js : detectRooms, reconcileRoomTypes, setRoomInfo, findOpenOutlines), couleurs pastel par type, nom et surface dans le plan, outil Pièce (menu des types + renommage), panneau « Pièces », avertissement de contour ouvert. (Phase 3 : voir ci-dessus.)
+- Fichiers présents (inchangés depuis la phase 8) : index.html, styles.css, core.js, store.js, editor2d.js, viewer3d.js, furniture.js, generator.js (briques 6a, placement 6b, recettes et logement 6c), ui.js, tests.js.
+- Ouvertures : plan.openings = [{ id « oN », type door|window|passage, start (arête de départ, x ou y croissant), span (arêtes), swing 'a'|'b' (a = haut/gauche), sill, height (m) }]. Elles reposent sur des arêtes de plan.walls (supprimer le mur les supprime) et ne fusionnent pas les pièces. Hauteurs par défaut : porte 2,05 m ; fenêtre allège 0,9 m, hauteur 1,2 m. getClearanceZones(plan) donne les rectangles de dégagement des portes (m) pour le générateur de mobilier.
+- Modèle : plan.roomTypes[« x,y »] = type et plan.roomNames[« x,y »] = nom, avec pour clé la case-ancre de la pièce (sa case la plus en haut à gauche) ; id de pièce = « room-x-y ». Une pièce sans entrée est de type « other ». Le store réconcilie ces entrées à chaque changement de murs (la nouvelle pièce hérite de l'ancienne qui partage le plus de cases).
+- core.js : modèle du plan + fonctions pures (grille, arêtes, murs, gomme, vue, pièces). store.js : actions, historique par instantanés (100 niveaux), transaction pour un geste = une entrée, sauvegarde dans le projet actif (voir la phase 7 ; ancienne clé « maison3d.plan » reprise comme premier projet). editor2d.js : rendu et événements pointer seulement.
+- Structure 3D : murs 0,1 m d'épaisseur centrés sur la ligne de grille, prolongés d'une demi-épaisseur aux angles et aux T ; ouverture = boîtes (allège, linteau, cadre, vitre, seuil) sans CSG ; un sol fin par pièce, matériau selon le type ; sol extérieur neutre ; le plan (x, y) devient (x, z) sans miroir. Les matériaux Three.js sont créés une fois ; les géométries sont libérées à chaque reconstruction.
+- Three.js est figé en version 0.160.0, chargé dans viewer3d.js par les modules « +esm » de jsDelivr (pas d'import map : Firefox ne l'appliquait pas dans l'artefact).
+-->
+<title>Maison 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 32 32" width="30" height="30" aria-hidden="true" focusable="false">
+        <path d="M4 4h24v24H4z M4 16h8 M20 16h8 M16 4v8 M16 20v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"/>
+      </svg>
+      <div class="brand-text">
+        <h1>Maison 3D</h1>
+        <span class="phase">Étages · finitions · soleil</span>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn btn-project" id="btn-files" aria-haspopup="dialog" aria-expanded="false" aria-controls="files-panel" title="Projets, export, import et partage">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        <span class="btn-project-name" id="project-name">Projets</span>
+      </button>
+      <button type="button" class="btn" id="btn-share" data-l-title="header.shareTitle">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M12 15V3M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span data-l="header.share"></span>
+      </button>
+      <button type="button" class="btn" id="btn-catalog" aria-pressed="false" title="Catalogue : tous les objets de mobilier et de décoration">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 11V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3M3 13a2 2 0 0 1 4 0v2h10v-2a2 2 0 0 1 4 0v4H3zM6 17v2M18 17v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span id="btn-catalog-label">Catalogue</span>
+      </button>
+      <button type="button" class="btn" id="btn-help" aria-haspopup="dialog" aria-expanded="false" aria-controls="help-panel" data-l-title="header.helpTitle">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span data-l="header.help"></span>
+      </button>
+      <button type="button" class="btn" id="btn-tests" aria-expanded="false" aria-controls="tests-panel">
+        <span class="dot" id="tests-dot" data-state="idle" aria-hidden="true"></span>
+        <span>Tests</span>
+        <span class="count" id="tests-count">—</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="banners" id="banners" aria-live="polite">
+    <div class="banner banner-warn" id="banner-storage" role="status" hidden>
+      <p>Le stockage du navigateur est indisponible ici : votre travail ne sera pas conservé quand vous quitterez la page. Pensez à l'exporter.</p>
+      <div class="banner-actions">
+        <button type="button" class="btn" id="banner-storage-export">Exporter le plan</button>
+        <button type="button" class="btn btn-icon" id="banner-storage-close" aria-label="Masquer ce message">×</button>
+      </div>
+    </div>
+    <div class="banner" id="banner-share" role="status" hidden>
+      <p id="banner-share-text"></p>
+      <div class="banner-actions">
+        <button type="button" class="btn btn-primary" id="banner-share-open">Ouvrir comme nouveau projet</button>
+        <button type="button" class="btn" id="banner-share-ignore">Ignorer</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Vue affichée">
+    <button type="button" class="tab" role="tab" id="tab-plan" data-view="plan" aria-selected="true" aria-controls="panel-plan">Plan</button>
+    <button type="button" class="tab" role="tab" id="tab-3d" data-view="3d" aria-selected="false" tabindex="-1" aria-controls="panel-3d">3D</button>
+    <button type="button" class="tab" role="tab" id="tab-both" data-view="both" aria-selected="false" tabindex="-1" aria-controls="panel-plan panel-3d" title="Plan et 3D l'un sous l'autre, en vue réduite">Plan + 3D</button>
+  </div>
+
+  <section class="catalog" id="catalog" aria-label="Catalogue d'objets" hidden>
+    <div class="catalog-bar">
+      <div class="cat-tabs" id="catalog-cats" role="group" aria-label="Catégorie"></div>
+      <div class="catalog-opts">
+        <label class="field catalog-palette"><span class="op-label">Palette</span>
+          <select id="catalog-palette"></select>
+        </label>
+        <span class="swatches" id="catalog-swatches" aria-hidden="true"></span>
+        <label class="toggle" title="Décoché : chaque objet est montré dans sa version moyenne, sans hasard">
+          <input type="checkbox" id="catalog-variations" checked>
+          <span>Variations aléatoires</span>
+        </label>
+        <button type="button" class="btn" id="catalog-reroll" title="Tirer d'autres variations">Nouveau tirage</button>
+      </div>
+    </div>
+    <p class="catalog-count" id="catalog-count" role="status"></p>
+    <div class="catalog-grid" id="catalog-grid"></div>
+    <div class="notice" id="notice-catalog" hidden></div>
+  </section>
+
+  <main class="workspace" id="workspace" data-view="plan">
+    <section class="sheet" id="panel-plan" role="tabpanel" aria-labelledby="tab-plan">
+      <div class="sheet-head"><span>Plan · 2D</span><span>x → · y ↓ (z en 3D)</span></div>
+      <div class="toolbar" role="toolbar" aria-label="Outils de dessin">
+        <div class="tool-group" role="group" aria-label="Outils">
+          <button type="button" class="tool" data-tool="wall" aria-pressed="true" title="Mur (W) : glisser d'un point à un autre">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M5 20V5h15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter"/></svg>
+            <span>Mur</span>
+          </button>
+          <button type="button" class="tool" data-tool="erase" aria-pressed="false" title="Gomme (E) : toucher ou glisser sur un mur">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="m7 21-4.3-4.3a2 2 0 0 1 0-2.8l9.6-9.6a2 2 0 0 1 2.8 0l5.6 5.6a2 2 0 0 1 0 2.8L13 21M22 21H7M5 11l9 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Gomme</span>
+          </button>
+          <button type="button" class="tool" data-tool="room" aria-pressed="false" title="Pièce (R) : toucher une pièce pour choisir son type et son nom">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4z" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/><path d="M4 12h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/></svg>
+            <span>Pièce</span>
+          </button>
+          <button type="button" class="tool" data-tool="furniture" aria-pressed="false" data-l-title="tools.furnitureTitle">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 11V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3M3 13a2 2 0 0 1 4 0v2h10v-2a2 2 0 0 1 4 0v4H3zM6 17v2M18 17v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span data-l="tools.furniture"></span>
+          </button>
+          <button type="button" class="tool" data-tool="stair" aria-pressed="false" data-l-title="tools.stairTitle">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3 20h5v-4h5v-4h5V8h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"/></svg>
+            <span data-l="tools.stair"></span>
+          </button>
+          <button type="button" class="tool" data-tool="hand" aria-pressed="false" title="Main (H) : déplacer la vue. Espace + glisser fonctionne aussi.">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.9-2.4L3.4 16a2 2 0 0 1 3.2-2.4L8 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Main</span>
+          </button>
+        </div>
+        <div class="tool-group tool-group-end" role="group" aria-label="Actions">
+          <button type="button" class="tool tool-icon" id="btn-undo" disabled aria-label="Annuler" title="Annuler (Ctrl+Z)">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="tool tool-icon" id="btn-redo" disabled aria-label="Rétablir" title="Rétablir (Ctrl+Maj+Z)">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="tool tool-icon" id="btn-fit" aria-label="Cadrer la vue" title="Cadrer toute la grille">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="tool tool-icon" id="btn-clear" disabled aria-label="Tout effacer" aria-expanded="false" aria-controls="confirm-clear" title="Tout effacer">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="tool-group tool-group-openings" role="group" aria-label="Ouvertures">
+          <button type="button" class="tool" data-tool="door" aria-pressed="false" title="Porte (D) : toucher un mur pour voir l'aperçu, toucher l'aperçu pour la poser">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 20h4M16 20h4M8 20V6M8 6a14 14 0 0 1 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"/></svg>
+            <span>Porte</span>
+          </button>
+          <button type="button" class="tool" data-tool="window" aria-pressed="false" title="Fenêtre (F) : toucher un mur pour voir l'aperçu, toucher l'aperçu pour la poser">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M2 12h3M19 12h3M5 9h14v6H5zM5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"/></svg>
+            <span>Fenêtre</span>
+          </button>
+          <button type="button" class="tool" data-tool="passage" aria-pressed="false" title="Passage (P) : ouverture libre dans un mur">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M2 12h4M18 12h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/><path d="M8 12h8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="2 2"/></svg>
+            <span>Passage</span>
+          </button>
+          <button type="button" class="tool" id="btn-flip" disabled title="Inverser le côté d'ouverture (I)">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Inverser</span>
+          </button>
+          <label class="toggle" title="Zones de dégagement : affiche, devant chaque porte, la zone de 1 m où le mobilier ne sera pas posé">
+            <input type="checkbox" id="chk-clearance">
+            <span>Dégagements</span>
+          </label>
+        </div>
+      </div>
+      <div class="levels-bar" id="levels-bar" role="group" data-l-aria="levels.group">
+        <div class="tool-group levels-tabs" id="levels-tabs" role="group" data-l-aria="levels.tabs"></div>
+        <button type="button" class="tool" id="level-add" data-l-title="levels.addTitle"><span data-l="levels.add"></span></button>
+        <label class="field level-name-field"><span class="op-label" data-l="levels.name"></span>
+          <input type="text" id="level-name" maxlength="30" autocomplete="off" spellcheck="false" data-l-aria="levels.nameAria">
+        </label>
+        <button type="button" class="tool tool-icon" id="level-remove" data-l-aria="levels.removeAria" data-l-title="levels.removeTitle">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="seg grid-seg" id="grid-seg" role="group" data-l-aria="grid.group">
+          <span class="op-label seg-label" data-l="grid.label"></span>
+          <button type="button" class="seg-btn" data-grid="0.5" aria-pressed="true" data-l-title="grid.coarseTitle">0,5 m</button>
+          <button type="button" class="seg-btn" data-grid="0.1" aria-pressed="false" data-l-title="grid.fineTitle">0,1 m</button>
+        </div>
+      </div>
+      <div class="stage" id="stage-2d">
+        <canvas id="canvas-2d" role="img" aria-label="Plan 2D : grille vide"></canvas>
+        <div class="notice" id="notice-2d" hidden></div>
+        <div class="stage-dock">
+          <p class="chip chip-warn" id="room-warning" role="status" hidden></p>
+        </div>
+        <div class="room-menu" id="room-menu" role="dialog" aria-labelledby="room-menu-title" hidden>
+          <div class="room-menu-head">
+            <span class="room-menu-title" id="room-menu-title">Pièce</span>
+            <button type="button" class="btn btn-icon" id="room-menu-close" aria-label="Fermer le menu de la pièce">×</button>
+          </div>
+          <div class="room-types" id="room-types" role="group" aria-label="Type de pièce"></div>
+          <form class="room-name" id="room-name-form" autocomplete="off">
+            <label for="room-name">Nom</label>
+            <input type="text" id="room-name" maxlength="40" enterkeyhint="done" spellcheck="false">
+            <button type="submit" class="btn">OK</button>
+          </form>
+        </div>
+        <div class="confirm" id="confirm-grid" role="alertdialog" aria-labelledby="confirm-grid-text" hidden>
+          <p id="confirm-grid-text"></p>
+          <div class="confirm-actions">
+            <button type="button" class="btn" id="confirm-grid-cancel" data-l="grid.keep"></button>
+            <button type="button" class="btn btn-primary" id="confirm-grid-ok" data-l="grid.convert"></button>
+          </div>
+        </div>
+        <div class="confirm" id="confirm-level" role="alertdialog" aria-labelledby="confirm-level-text" hidden>
+          <p id="confirm-level-text"></p>
+          <div class="confirm-actions">
+            <button type="button" class="btn" id="confirm-level-cancel" data-l="levels.keep"></button>
+            <button type="button" class="btn btn-danger" id="confirm-level-ok" data-l="levels.remove"></button>
+          </div>
+        </div>
+        <div class="confirm" id="confirm-clear" role="alertdialog" aria-labelledby="confirm-title" hidden>
+          <p id="confirm-title" data-l="levels.clearAll"></p>
+          <div class="confirm-actions">
+            <button type="button" class="btn" id="confirm-cancel">Garder le plan</button>
+            <button type="button" class="btn btn-danger" id="confirm-ok">Tout effacer</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="right-col" id="right-col">
+    <section class="sheet" id="panel-3d" role="tabpanel" aria-labelledby="tab-3d">
+      <div class="sheet-head"><span>Vue · 3D</span><span>Glisser : tourner · Pincer : zoom</span></div>
+      <div class="toolbar toolbar-3d" role="toolbar" aria-label="Contrôles de la vue 3D">
+        <div class="tool-group" role="group" aria-label="Point de vue">
+          <button type="button" class="tool" id="btn-view-top" aria-pressed="false" disabled title="Vue du dessus : le plan vu d'en haut, comme à gauche">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4zM4 12h8M12 12v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/></svg>
+            <span>Dessus</span>
+          </button>
+          <button type="button" class="tool" id="btn-view-persp" aria-pressed="true" disabled title="Vue en perspective : recadre sur le plan">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M12 3 3 8v8l9 5 9-5V8zM3 8l9 5 9-5M12 13v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            <span>Perspective</span>
+          </button>
+        </div>
+        <div class="tool-group" role="group" aria-label="Hauteur des murs">
+          <button type="button" class="tool" id="btn-walls-full" aria-pressed="true" disabled title="Murs complets (2,5 m)"><span>Murs complets</span></button>
+          <button type="button" class="tool" id="btn-walls-low" aria-pressed="false" disabled title="Murs abaissés à 0,3 m pour voir l'intérieur"><span>Murs abaissés</span></button>
+          <button type="button" class="tool" id="btn-walls-auto" aria-pressed="false" disabled data-l-title="view.wallsAutoTitle"><span data-l="view.wallsAuto"></span></button>
+        </div>
+        <div class="tool-group" id="level-view" role="group" data-l-aria="levels.viewGroup">
+          <button type="button" class="tool" id="btn-lv-upto" aria-pressed="true" disabled data-l-title="levels.viewUptoTitle"><span data-l="levels.viewUpto"></span></button>
+          <button type="button" class="tool" id="btn-lv-all" aria-pressed="false" disabled data-l-title="levels.viewAllTitle"><span data-l="levels.viewAll"></span></button>
+          <button type="button" class="tool" id="btn-lv-solo" aria-pressed="false" disabled data-l-title="levels.viewSoloTitle"><span data-l="levels.viewSolo"></span></button>
+        </div>
+        <div class="tool-group" id="grp-walk" role="group" data-l-aria="view.tourGroup">
+          <button type="button" class="tool tool-primary" id="btn-walk" disabled data-l-title="view.walkTitle">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle cx="13" cy="4.5" r="2" fill="currentColor"/><path d="M9 21l2-6-2-3 1-5 3-1 3 4h3M13 11l1 4 3 6M10 7l-3 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span data-l="view.walk"></span>
+          </button>
+        </div>
+        <div class="tool-group tool-group-end" id="grp-capture">
+          <button type="button" class="tool tool-icon" id="btn-capture" disabled aria-label="Capture d'écran" title="Capture d'écran de la vue 3D (PNG)">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="toolbar gen-bar" id="gen-bar" role="group" aria-label="Ameublement automatique">
+        <button type="button" class="tool tool-primary" id="btn-generate" title="Meuble tout le logement avec la graine indiquée (les pièces verrouillées sont conservées)">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" fill="currentColor"/></svg>
+          <span>Générer</span>
+        </button>
+        <div class="tool-group" role="group" aria-label="Annuler et rétablir">
+          <button type="button" class="tool tool-icon" id="btn-undo-3d" disabled aria-label="Annuler" title="Annuler">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="tool tool-icon" id="btn-redo-3d" disabled aria-label="Rétablir" title="Rétablir">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <label class="field"><span class="op-label">Graine</span>
+          <input type="number" id="gen-seed" inputmode="numeric" min="0" max="999999999" step="1" value="1" aria-label="Graine du hasard (Entrée pour générer avec cette graine)">
+        </label>
+        <button type="button" class="tool tool-icon" id="btn-dice" aria-label="Nouvelle graine au hasard" title="Tire une nouvelle graine et génère">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.4" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.4" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.4" fill="currentColor"/></svg>
+        </button>
+        <label class="field"><span class="op-label">Style</span>
+          <select id="gen-style" aria-label="Style du logement (palette)"></select>
+        </label>
+        <label class="toggle gen-all" id="gen-all-label" hidden title="Meuble tous les niveaux d'un coup (sinon seulement le niveau affiché)">
+          <input type="checkbox" id="gen-all">
+          <span>Tous les niveaux</span>
+        </label>
+        <button type="button" class="tool" id="btn-generate-clear" disabled title="Retire le mobilier des pièces non verrouillées"><span>Vider le mobilier</span></button>
+        <span class="gen-status" id="gen-status" role="status" aria-live="polite">Donnez un type à vos pièces, puis touchez Générer. Le mobilier est enregistré avec le plan.</span>
+      </div>
+      <div class="stage" id="stage-3d">
+        <div class="notice" id="notice-3d" hidden></div>
+        <div class="walk-hud" id="walk-hud" hidden>
+          <div class="walk-top">
+            <button type="button" class="btn btn-primary" id="walk-exit" data-l="walk.exit"></button>
+            <p class="walk-hint" id="walk-hint"></p>
+            <p class="walk-level" id="walk-level" role="status" aria-live="polite" hidden></p>
+          </div>
+          <div class="joystick" id="walk-stick" role="group" data-l-aria="walk.stick">
+            <div class="joystick-knob" id="walk-knob"></div>
+          </div>
+        </div>
+        <div class="sun-panel" id="sun-panel" role="dialog" aria-labelledby="sun-title" hidden>
+          <div class="capture-head">
+            <span id="sun-title" data-l="light.reportHeading"></span>
+            <button type="button" class="btn btn-icon" id="sun-close" data-l-aria="light.reportClose">×</button>
+          </div>
+          <label class="field sun-lat"><span class="op-label" data-l="light.latitude"></span>
+            <input type="text" id="lt-lat" inputmode="decimal" autocomplete="off" size="5" data-l-aria="light.latitudeAria">
+          </label>
+          <p class="sun-day" id="sun-day"></p>
+          <ul class="sun-list" id="sun-list"></ul>
+          <p class="capture-hint" data-l="light.reportHint"></p>
+        </div>
+        <pre class="perf-hud" id="perf-hud" aria-live="off" hidden></pre>
+        <div class="capture" id="capture-box" role="dialog" aria-labelledby="capture-title" hidden>
+          <div class="capture-head">
+            <span id="capture-title">Capture prête</span>
+            <button type="button" class="btn btn-icon" id="capture-close" aria-label="Fermer la capture">×</button>
+          </div>
+          <img id="capture-img" alt="Capture de la vue 3D">
+          <div class="capture-actions">
+            <a class="btn" id="capture-download" download="maison-3d.png" href="#">Télécharger</a>
+            <a class="btn" id="capture-open" target="_blank" rel="noopener" href="#">Ouvrir dans un onglet</a>
+          </div>
+          <p class="capture-hint">Si le téléchargement n'a pas démarré, utilisez « Télécharger » ou appuyez longuement sur l'image.</p>
+        </div>
+      </div>
+      <div class="toolbar light-bar" id="light-bar" role="group" data-l-aria="light.group">
+        <label class="field field-range"><span class="op-label" data-l="light.hour"></span>
+          <input type="range" id="lt-hour" min="0" max="24" step="0.25" value="15" data-l-aria="light.hourAria">
+          <output id="lt-hour-out" for="lt-hour">15:00</output>
+        </label>
+        <label class="field"><span class="op-label" data-l="light.month"></span>
+          <select id="lt-month" data-l-aria="light.monthAria"></select>
+        </label>
+        <label class="field field-range"><span class="op-label" data-l="light.north"></span>
+          <input type="range" id="lt-north" min="-180" max="180" step="5" value="0" data-l-aria="light.northAria">
+          <output id="lt-north-out" for="lt-north">0°</output>
+        </label>
+        <label class="field"><span class="op-label" data-l="light.lamps"></span>
+          <select id="lt-lamps" data-l-aria="light.lampsAria"></select>
+        </label>
+        <button type="button" class="tool" id="btn-sun-report" aria-pressed="false" aria-controls="sun-panel" disabled data-l-title="light.reportTitle"><span data-l="light.report"></span></button>
+        <span class="gen-status" id="lt-status" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <div class="side-stack" id="side-stack">
+      <section class="sheet opening-panel" id="opening-panel" role="group" aria-label="Propriétés de l'ouverture" hidden>
+        <div class="op-row">
+          <div class="seg" role="group" aria-label="Type d'ouverture">
+            <button type="button" class="seg-btn" data-optype="door" aria-pressed="false">Porte</button>
+            <button type="button" class="seg-btn" data-optype="window" aria-pressed="false">Fenêtre</button>
+            <button type="button" class="seg-btn" data-optype="passage" aria-pressed="false">Passage</button>
+          </div>
+          <div class="op-actions">
+            <button type="button" class="btn" id="op-flip" title="Inverser le côté d'ouverture">Inverser</button>
+            <button type="button" class="btn btn-danger" id="op-delete">Supprimer</button>
+            <button type="button" class="btn btn-icon" id="op-close" aria-label="Fermer le panneau de l'ouverture">×</button>
+          </div>
+        </div>
+        <div class="op-row op-fields">
+          <div class="stepper" role="group" aria-label="Largeur">
+            <span class="op-label">Largeur</span>
+            <button type="button" class="btn btn-icon" id="op-narrower" aria-label="Réduire d'une arête (0,5 m)">−</button>
+            <output id="op-width" aria-live="polite">1,0 m</output>
+            <button type="button" class="btn btn-icon" id="op-wider" aria-label="Élargir d'une arête (0,5 m)">+</button>
+          </div>
+          <label class="field"><span class="op-label">Allège (m)</span><input type="text" id="op-sill" inputmode="decimal" autocomplete="off" size="4"></label>
+          <label class="field"><span class="op-label">Hauteur (m)</span><input type="text" id="op-height" inputmode="decimal" autocomplete="off" size="4"></label>
+        </div>
+      </section>
+
+      <section class="sheet side-panel" id="stair-panel" role="group" data-l-aria="stair.panel" hidden>
+        <div class="op-row">
+          <p class="panel-title" id="stair-title"></p>
+          <div class="op-actions">
+            <button type="button" class="btn" id="st-rotate" data-l-title="stair.rotateTitle" data-l="stair.rotate"></button>
+            <button type="button" class="btn" id="st-flip" data-l-title="stair.flipTitle" data-l="stair.flip"></button>
+            <button type="button" class="btn btn-danger" id="st-delete" data-l="stair.delete"></button>
+            <button type="button" class="btn btn-icon" id="st-close" data-l-aria="stair.close">×</button>
+          </div>
+        </div>
+        <div class="op-row op-fields">
+          <div class="seg" id="st-kind" role="group" data-l-aria="stair.kindGroup">
+            <span class="op-label seg-label" data-l="stair.kindLabel"></span>
+            <button type="button" class="seg-btn" data-kind="straight" aria-pressed="true" data-l="stair.kinds.straight" data-l-title="stair.kindTitles.straight"></button>
+            <button type="button" class="seg-btn" data-kind="l" aria-pressed="false" data-l="stair.kinds.l" data-l-title="stair.kindTitles.l"></button>
+            <button type="button" class="seg-btn" data-kind="u" aria-pressed="false" data-l="stair.kinds.u" data-l-title="stair.kindTitles.u"></button>
+            <button type="button" class="seg-btn" data-kind="spiral" aria-pressed="false" data-l="stair.kinds.spiral" data-l-title="stair.kindTitles.spiral"></button>
+          </div>
+        </div>
+        <div class="op-row op-fields stair-looks">
+          <label class="field"><span class="op-label" data-l="stair.stepsLabel"></span>
+            <select id="st-steps" data-l-aria="stair.stepsGroup"></select>
+          </label>
+          <label class="field"><span class="op-label" data-l="stair.railLabel"></span>
+            <select id="st-rail" data-l-aria="stair.railGroup"></select>
+          </label>
+          <label class="field"><span class="op-label" data-l="stair.finishLabel"></span>
+            <select id="st-finish" data-l-aria="stair.finishGroup"></select>
+          </label>
+        </div>
+        <div class="op-row op-fields">
+          <div class="stepper" role="group" data-l-aria="stair.widthGroup">
+            <span class="op-label" id="st-width-label" data-l="stair.width"></span>
+            <button type="button" class="btn btn-icon" id="st-narrower" data-l-aria="stair.narrower">−</button>
+            <output id="st-width" aria-live="polite">1,0 m</output>
+            <button type="button" class="btn btn-icon" id="st-wider" data-l-aria="stair.wider">+</button>
+          </div>
+          <div class="stepper" role="group" data-l-aria="stair.runGroup">
+            <span class="op-label" id="st-run-label" data-l="stair.run"></span>
+            <button type="button" class="btn btn-icon" id="st-shorter" data-l-aria="stair.shorter">−</button>
+            <output id="st-run" aria-live="polite">3,5 m</output>
+            <button type="button" class="btn btn-icon" id="st-longer" data-l-aria="stair.longer">+</button>
+          </div>
+          <div class="stepper" role="group" data-l-aria="stair.sideGroup" id="st-side-group">
+            <span class="op-label" data-l="stair.side"></span>
+            <button type="button" class="btn btn-icon" id="st-side-less" data-l-aria="stair.sideLess">−</button>
+            <output id="st-side" aria-live="polite">1,0 m</output>
+            <button type="button" class="btn btn-icon" id="st-side-more" data-l-aria="stair.sideMore">+</button>
+          </div>
+        </div>
+        <p class="panel-hint" id="stair-hint" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="sheet side-panel furniture-panel" id="furniture-panel" role="group" data-l-aria="item.panel" hidden>
+        <div class="op-row">
+          <p class="panel-title" id="item-title" data-l="item.title"></p>
+          <div class="op-actions">
+            <button type="button" class="btn btn-icon" id="item-close" data-l-aria="item.close">×</button>
+          </div>
+        </div>
+        <div class="item-selected" id="item-selected" hidden>
+          <div class="op-row">
+            <p class="panel-title" id="item-name"></p>
+            <div class="op-actions">
+              <button type="button" class="btn" id="item-rotate" data-l-title="item.rotateTitle" data-l="item.rotate"></button>
+              <button type="button" class="btn" id="item-reroll" data-l-title="item.rerollTitle" data-l="item.reroll"></button>
+              <button type="button" class="btn" id="item-duplicate" data-l="item.duplicate"></button>
+              <button type="button" class="btn btn-danger" id="item-delete" data-l="item.delete"></button>
+            </div>
+          </div>
+          <div class="op-row op-fields">
+            <label class="field"><span class="op-label" data-l="item.replace"></span>
+              <select id="item-replace" data-l-aria="item.replaceAria"></select>
+            </label>
+            <p class="panel-hint" id="item-lock" hidden>
+              <span data-l="item.locked"></span>
+              <button type="button" class="btn" id="item-unlock" data-l="item.unlock"></button>
+            </p>
+          </div>
+        </div>
+        <div class="item-catalog" id="item-catalog">
+          <div class="op-row op-fields">
+            <label class="field"><span class="op-label" data-l="item.category"></span>
+              <select id="item-category" data-l-aria="item.categoryAria"></select>
+            </label>
+            <p class="panel-hint" id="item-hint" role="status" aria-live="polite"></p>
+          </div>
+          <div class="item-grid" id="item-grid" role="group" data-l-aria="item.gridAria"></div>
+        </div>
+      </section>
+
+      <section class="sheet side-panel finish-panel" id="finish-panel" role="group" data-l-aria="finish.panel" hidden>
+        <div class="op-row">
+          <p class="panel-title" id="finish-title"></p>
+          <div class="op-actions">
+            <button type="button" class="btn" id="finish-reset" data-l="finish.reset"></button>
+            <button type="button" class="btn btn-icon" id="finish-close" data-l-aria="finish.close">×</button>
+          </div>
+        </div>
+        <p class="panel-hint" id="finish-sun" role="status"></p>
+        <div class="finish-section"><h3 class="op-label" data-l="finish.floor"></h3><div class="swatch-grid" id="finish-floor" role="group" data-l-aria="finish.floorAria"></div></div>
+        <div class="finish-section"><h3 class="op-label" data-l="finish.wall"></h3><div class="swatch-grid" id="finish-wall" role="group" data-l-aria="finish.wallAria"></div>
+          <label class="field finish-custom"><span class="op-label" data-l="finish.custom"></span><input type="color" id="finish-color" value="#d9cbb2" data-l-aria="finish.customAria"></label>
+        </div>
+        <div class="finish-section"><h3 class="op-label" data-l="finish.baseboard"></h3><div class="swatch-grid" id="finish-baseboard" role="group" data-l-aria="finish.baseboardAria"></div></div>
+      </section>
+    </div>
+
+    <section class="sheet rooms" id="rooms-panel" aria-labelledby="rooms-title">
+      <button type="button" class="rooms-head" id="rooms-toggle" aria-expanded="true" aria-controls="rooms-body">
+        <span class="rooms-title" id="rooms-title">Pièces</span>
+        <span class="rooms-summary" id="rooms-summary">Aucune</span>
+        <svg class="chevron" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="rooms-body" id="rooms-body">
+        <p class="rooms-empty" id="rooms-empty">Aucune pièce fermée. Tracez des murs qui se rejoignent pour en créer une.</p>
+        <ul class="rooms-list" id="rooms-list"></ul>
+      </div>
+    </section>
+    </div>
+
+    <aside class="tests-panel" id="tests-panel" role="dialog" aria-labelledby="tests-title" hidden>
+      <div class="tests-head">
+        <h2 id="tests-title">Tests</h2>
+        <p class="tests-summary" id="tests-summary"></p>
+        <button type="button" class="btn" id="tests-full" title="Rejoue les tests de génération avec 200 graines par pièce (quelques secondes)">200 graines</button>
+        <button type="button" class="btn btn-icon" id="tests-close" aria-label="Fermer le panneau des tests">×</button>
+      </div>
+      <div id="tests-body"></div>
+    </aside>
+  </main>
+
+  <footer class="cartouche" aria-label="Caractéristiques du plan">
+    <div class="cell"><span class="cell-label">Grille</span><span class="cell-value" id="st-grid"></span></div>
+    <div class="cell"><span class="cell-label">Échelle</span><span class="cell-value" id="st-scale"></span></div>
+    <div class="cell"><span class="cell-label">Surface</span><span class="cell-value" id="st-surface"></span></div>
+    <div class="cell"><span class="cell-label">Hauteur des murs</span><span class="cell-value" id="st-walls"></span></div>
+    <div class="cell"><span class="cell-label">Murs tracés</span><span class="cell-value" id="st-drawn"></span></div>
+    <div class="cell"><span class="cell-label">Sauvegarde</span><span class="cell-value" id="st-save"></span></div>
+  </footer>
+</div>
+
+<div class="files-backdrop" id="files-backdrop" hidden>
+  <section class="files-panel" id="files-panel" role="dialog" aria-modal="true" aria-labelledby="files-title">
+    <div class="files-head">
+      <h2 id="files-title">Projets et fichiers</h2>
+      <button type="button" class="btn btn-icon" id="files-close" aria-label="Fermer">×</button>
+    </div>
+    <div class="files-body">
+      <section class="files-section" aria-labelledby="projects-title">
+        <div class="files-section-head">
+          <h3 id="projects-title">Mes projets</h3>
+          <button type="button" class="btn" id="project-new">Nouveau projet</button>
+        </div>
+        <p class="files-hint" id="projects-hint"></p>
+        <ul class="project-list" id="project-list"></ul>
+      </section>
+
+      <section class="files-section" aria-labelledby="export-title">
+        <h3 id="export-title">Exporter le projet ouvert</h3>
+        <div class="export-grid">
+          <button type="button" class="btn" id="export-json" title="Fichier .json : le plan complet, à réimporter plus tard">Plan (.json)</button>
+          <button type="button" class="btn" id="export-json-text" title="Affiche le JSON dans une zone de texte, à copier">Afficher le JSON</button>
+          <button type="button" class="btn" id="export-png2d" title="Image PNG du plan 2D">Image du plan (.png)</button>
+          <button type="button" class="btn" id="export-glb" title="Modèle 3D (glTF binaire) pour Blender, un visualiseur 3D, etc.">Modèle 3D (.glb)</button>
+          <button type="button" class="btn" id="export-png3d" title="Capture de la vue 3D">Capture 3D (.png)</button>
+          <button type="button" class="btn" id="export-share" title="Lien contenant le plan compressé (dans la partie # de l'adresse)">Lien de partage</button>
+        </div>
+        <div class="export-out" id="export-out" hidden>
+          <p class="export-out-label" id="export-out-label"></p>
+          <textarea id="export-text" readonly rows="6" spellcheck="false" aria-labelledby="export-out-label"></textarea>
+          <div class="export-out-actions">
+            <button type="button" class="btn btn-primary" id="export-copy">Copier</button>
+            <button type="button" class="btn" id="export-copy-code" hidden>Copier le code seul</button>
+            <button type="button" class="btn" id="export-out-close">Fermer</button>
+          </div>
+        </div>
+        <p class="files-status" id="export-status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="files-section" aria-labelledby="import-title">
+        <h3 id="import-title">Importer</h3>
+        <div class="import-row">
+          <label class="btn" for="import-file">Choisir un fichier…</label>
+          <input type="file" id="import-file" class="visually-hidden" accept=".json,application/json,text/plain">
+          <span class="files-hint">ou collez un plan (JSON), un lien de partage ou son code :</span>
+        </div>
+        <textarea id="import-text" rows="4" spellcheck="false" autocomplete="off" placeholder="Collez ici le contenu d'un fichier .json, un lien de partage ou un code de partage" aria-label="Plan à importer (JSON, lien ou code de partage)"></textarea>
+        <div class="export-out-actions">
+          <button type="button" class="btn btn-primary" id="import-go">Importer comme nouveau projet</button>
+        </div>
+        <div class="import-msg" id="import-msg" role="status" aria-live="polite"></div>
+      </section>
+    </div>
+  </section>
+</div>
+
+<div class="files-backdrop" id="welcome" hidden>
+  <section class="files-panel welcome-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+    <div class="files-head">
+      <h2 id="welcome-title" data-l="welcome.title"></h2>
+      <button type="button" class="btn btn-icon" id="welcome-close" data-l-aria="welcome.close">×</button>
+    </div>
+    <div class="files-body">
+      <p class="files-hint" data-l="welcome.intro"></p>
+      <ul class="template-grid" id="template-grid"></ul>
+      <div class="export-out-actions">
+        <button type="button" class="btn" id="welcome-blank" data-l="welcome.blank"></button>
+        <button type="button" class="btn" id="welcome-skip" data-l="welcome.skip"></button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<aside class="tour" id="tour" role="dialog" aria-labelledby="tour-title" aria-live="polite" hidden>
+  <p class="tour-step" id="tour-step"></p>
+  <h2 class="tour-title" id="tour-title"></h2>
+  <p class="tour-text" id="tour-text"></p>
+  <div class="tour-actions">
+    <button type="button" class="btn" id="tour-skip" data-l="tour.skip"></button>
+    <button type="button" class="btn" id="tour-prev" data-l="tour.prev"></button>
+    <button type="button" class="btn btn-primary" id="tour-next" data-l="tour.next"></button>
+  </div>
+</aside>
+
+<div class="files-backdrop" id="help-backdrop" hidden>
+  <section class="files-panel" id="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="files-head">
+      <h2 id="help-title" data-l="help.title"></h2>
+      <button type="button" class="btn btn-icon" id="help-close" data-l-aria="help.close">×</button>
+    </div>
+    <div class="files-body" id="help-body"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="ui.js"></script>
+<script src="pwa.js" defer></script>
+</body>
+</html>
